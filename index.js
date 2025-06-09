@@ -53,16 +53,16 @@ async function run() {
 
 
 
-        // app.get('/requests', async(req, res) => {
-        //     const email = req.query.email;
+        app.get('/requests', async(req, res) => {
+            const email = req.query.email;
             
-        //     const query = {
-        //         userEmail: email
-        //     }
+            const query = {
+                userEmail: email
+            }
 
-        //     const result = await requestCollection.find(query).toArray()
-        //     res.send(result);
-        // })
+            const result = await requestCollection.find(query).toArray()
+            res.send(result);
+        })
 
 
         app.post('/requests', async (req, res) => {
