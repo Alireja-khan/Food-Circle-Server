@@ -36,25 +36,41 @@ async function run() {
 
         // Foods api
 
-        app.get('/foods', async(req, res) => {
+        app.get('/foods', async (req, res) => {
             const cursor = foodsCollection.find();
             const result = await cursor.toArray();
             res.send(result);
         });
 
-        app.get('/foods/:id', async(req, res) => {
+        app.get('/foods/:id', async (req, res) => {
             const id = req.params.id;
-            const query = {_id: new ObjectId(id)}
+            const query = { _id: new ObjectId(id) }
             const result = await foodsCollection.findOne(query);
             res.send(result);
         });
 
-        // app.post('/requests', async(req, res) => {
-        //     const request = req.body;
-        //     console.log(request);
-        //     const result = await requestCollection.insertOne(request);
+
+
+
+
+        // app.get('/requests', async(req, res) => {
+        //     const email = req.query.email;
+            
+        //     const query = {
+        //         userEmail: email
+        //     }
+
+        //     const result = await requestCollection.find(query).toArray()
         //     res.send(result);
         // })
+
+
+        app.post('/requests', async (req, res) => {
+            const request = req.body;
+            console.log(request);
+            const result = await requestCollection.insertOne(request);
+            res.send(result);
+        })
 
 
 
