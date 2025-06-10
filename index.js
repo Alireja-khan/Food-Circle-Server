@@ -49,6 +49,13 @@ async function run() {
             res.send(result);
         });
 
+        app.post('/foods', async(req, res) => {
+            const newFood = req.body;
+            console.log(newFood);
+            const result = await foodsCollection.insertOne(newFood);
+            res.send(result);
+        })
+
 
 
 
@@ -62,7 +69,7 @@ async function run() {
 
             const result = await requestCollection.find(query).toArray()
             res.send(result);
-        })
+        });
 
 
         app.post('/requests', async (req, res) => {
@@ -70,7 +77,7 @@ async function run() {
             console.log(request);
             const result = await requestCollection.insertOne(request);
             res.send(result);
-        })
+        });
 
 
 
