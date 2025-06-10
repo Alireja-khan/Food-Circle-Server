@@ -37,10 +37,19 @@ async function run() {
         // Foods api
 
         app.get('/foods', async (req, res) => {
-            const cursor = foodsCollection.find();
+
+            const email = req.query.email;
+            const query = {};
+            if (email) {
+                query.userEmail = email;
+            }
+
+            const cursor = foodsCollection.find(query);
             const result = await cursor.toArray();
             res.send(result);
         });
+
+
 
         app.get('/foods/:id', async (req, res) => {
             const id = req.params.id;
@@ -49,7 +58,7 @@ async function run() {
             res.send(result);
         });
 
-        app.post('/foods', async(req, res) => {
+        app.post('/foods', async (req, res) => {
             const newFood = req.body;
             console.log(newFood);
             const result = await foodsCollection.insertOne(newFood);
@@ -60,9 +69,9 @@ async function run() {
 
 
 
-        app.get('/requests', async(req, res) => {
+        app.get('/requests', async (req, res) => {
             const email = req.query.email;
-            
+
             const query = {
                 userEmail: email
             }
