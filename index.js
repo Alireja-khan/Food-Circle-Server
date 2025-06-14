@@ -1,7 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const app = express();
-const port = process.env.Port || 3000;
+const port = process.env.PORT || 3000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config()
 
@@ -50,6 +50,40 @@ async function run() {
         });
 
 
+        app.get('/foods/featured', async (req, res) => {
+            try {
+                const query = { status: 'available' };
+
+                const result = await foodsCollection
+                    .find(query)
+                    .sort({ quantity: -1 })
+                    .limit(6)
+                    .toArray();
+
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ error: 'Failed to fetch featured foods' });
+            }
+        });
+
+
+        app.get('/foods/available', async (req, res) => {
+            try {
+                const query = { status: 'available' };
+
+                const result = await foodsCollection
+                    .find(query)
+                    .sort({ expireDate: 1 })
+                    .toArray();
+
+                res.send(result);
+            } catch (error) {
+                res.status(500).send({ error: 'Failed to fetch available foods' });
+            }
+        });
+
+
+
 
         app.get('/foods/:id', async (req, res) => {
             const id = req.params.id;
@@ -58,12 +92,28 @@ async function run() {
             res.send(result);
         });
 
+
         app.post('/foods', async (req, res) => {
             const newFood = req.body;
             console.log(newFood);
+            newFood.quantity = parseInt(newFood.quantity);
             const result = await foodsCollection.insertOne(newFood);
             res.send(result);
-        })
+        });
+
+
+        app.patch('/foods/:id/status', async (req, res) => {
+            const id = req.params.id;
+            const newStatus = req.body.status;
+
+            const result = await foodsCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { status: newStatus } }
+            );
+            res.send(result);
+        });
+
+
 
 
 
@@ -90,9 +140,38 @@ async function run() {
 
 
 
+
+        app.delete('/api/delete-food/:id', async (req, res) => {
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) };
+            const result = await foodsCollection.deleteOne(query);
+
+            res.send({ success: result.deletedCount === 1 });
+        });
+
+
+
+        app.put('/foods/:id', async (req, res) => {
+            const id = req.params.id;
+            const updatedFood = req.body;
+
+            // if quantity is string ensure it's parsed into number
+            if (updatedFood.quantity) {
+                updatedFood.quantity = parseInt(updatedFood.quantity);
+            }
+
+            const filter = { _id: new ObjectId(id) };
+            const updateDoc = { $set: updatedFood };
+
+            const result = await foodsCollection.updateOne(filter, updateDoc);
+            res.send(result);
+        });
+
+
+
         // Send a ping to confirm a successful connection
-        await client.db("admin").command({ ping: 1 });
-        console.log("Pinged your deployment. You successfully connected to MongoDB!");
+        // await client.db("admin").command({ ping: 1 });
+        // console.log("Pinged your deployment. You successfully connected to MongoDB!");
     } finally {
         // Ensures that the client will close when you finish/error
         // await client.close();
