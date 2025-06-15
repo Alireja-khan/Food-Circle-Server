@@ -50,6 +50,11 @@ async function run() {
         });
 
 
+
+
+
+
+
         app.get('/foods/featured', async (req, res) => {
             try {
                 const query = { status: 'available' };
@@ -91,6 +96,9 @@ async function run() {
             const result = await foodsCollection.findOne(query);
             res.send(result);
         });
+
+
+
 
 
         app.post('/foods', async (req, res) => {
