@@ -28,7 +28,7 @@ const client = new MongoClient(uri, {
 
 async function run() {
     try {
-        // Connect the client to the server	(optional starting in v4.7)
+
         await client.connect();
 
         const foodsCollection = client.db('foodCircle').collection('foods');
@@ -163,7 +163,7 @@ async function run() {
             const id = req.params.id;
             const updatedFood = req.body;
 
-            // if quantity is string ensure it's parsed into number
+
             if (updatedFood.quantity) {
                 updatedFood.quantity = parseInt(updatedFood.quantity);
             }
