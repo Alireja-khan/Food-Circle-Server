@@ -42,7 +42,7 @@ async function run() {
                 const result = await foodsCollection
                     .find({ status: 'available' })
                     .sort({ quantity: -1 })
-                    .limit(6)
+                    .limit(8)
                     .toArray();
                 res.send(result);
             } catch (error) {
@@ -105,7 +105,7 @@ async function run() {
 
         // ✅ DELETE a food item
         app.delete('/api/delete-food/:id', async (req, res) => {
-            const id = req.params.id;
+            const id = req.params.id; 
             const result = await foodsCollection.deleteOne({ _id: new ObjectId(id) });
             res.send({ success: result.deletedCount === 1 });
         });
