@@ -6,7 +6,7 @@ FoodCircle is a food sharing platform that allows users to donate, request, and 
 
 ## 🚀 Live Server
 
-🌐 [Live Link]([utter-waste.surge.sh](https://utter-waste.surge.sh/))  
+🌐 [Live Link](https://utter-waste.surge.sh/)  
 📦 [Clint Repository](https://github.com/Alireja-khan/Food-Circle-Client)
 
 ---
