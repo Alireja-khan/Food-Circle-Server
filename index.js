@@ -3,24 +3,27 @@ const cors = require('cors');
 const app = express();
 const http = require('http');
 const { Server } = require('socket.io');
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000; // Changed from 3000 to 5000
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 require('dotenv').config();
 
-// Middleware
-app.use(cors());
+// -------------------- Middleware --------------------
+app.use(cors({
+  origin: ["http://localhost:5173", "http://localhost:3000", "your-production-url"], // Added localhost:3000
+  methods: ["GET", "POST", "PATCH", "PUT", "DELETE"]
+}));
 app.use(express.json());
 
-// Create HTTP server and Socket.IO
+// -------------------- Create HTTP server and Socket.IO --------------------
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: ["http://localhost:5173", "your-production-url"],
+    origin: ["http://localhost:5173", "http://localhost:3000", "your-production-url"], // Added localhost:3000
     methods: ["GET", "POST"]
   }
 });
 
-// MongoDB Connection
+// -------------------- MongoDB Connection --------------------
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vgnu9ma.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 const client = new MongoClient(uri, {
@@ -31,7 +34,7 @@ const client = new MongoClient(uri, {
   }
 });
 
-// Socket.IO Connection Handling
+// -------------------- Socket.IO Logic --------------------
 io.on('connection', (socket) => {
   console.log('User connected:', socket.id);
 
@@ -56,18 +59,14 @@ io.on('connection', (socket) => {
       };
 
       const result = await messagesCollection.insertOne(messageData);
-      
-      // Add the MongoDB ID to the message data
       messageData._id = result.insertedId;
-      
-      // Broadcast to everyone in the room
       io.to(data.roomId).emit('receive_message', messageData);
     } catch (error) {
       console.error('Error saving message:', error);
     }
   });
 
-  // Handle typing indicators
+  // Typing indicators
   socket.on('typing_start', (data) => {
     socket.to(data.roomId).emit('user_typing', {
       userName: data.userName,
@@ -87,21 +86,28 @@ io.on('connection', (socket) => {
   });
 });
 
+// -------------------- Main Run Function --------------------
 async function run() {
   try {
+    await client.connect();
     const db = client.db('foodCircle');
     const foodsCollection = db.collection('foods');
     const requestCollection = db.collection('requests');
-    const messagesCollection = db.collection('messages'); // Add messages collection
+    const messagesCollection = db.collection('messages');
 
-    // ✅ YOUR EXISTING FOOD ROUTES (keep all of them exactly as they are)
+    // ✅ Get all foods
     app.get('/api/foods', async (req, res) => {
-      const email = req.query.email;
-      const query = email ? { userEmail: email } : {};
-      const result = await foodsCollection.find(query).toArray();
-      res.send(result);
+      try {
+        const email = req.query.email;
+        const query = email ? { userEmail: email } : {};
+        const result = await foodsCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to fetch foods' });
+      }
     });
 
+    // ✅ Get featured foods
     app.get('/api/foods/featured', async (req, res) => {
       try {
         const result = await foodsCollection
@@ -115,15 +121,47 @@ async function run() {
       }
     });
 
-    // ... KEEP ALL YOUR EXISTING ROUTES EXACTLY AS THEY ARE ...
+    // ✅ Get all available foods
+    app.get('/api/foods/available', async (req, res) => {
+      try {
+        const result = await foodsCollection.find({ status: 'available' }).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error('Error fetching available foods:', error);
+        res.status(500).send({ error: 'Failed to fetch available foods' });
+      }
+    });
 
-    // ✅ ADD NEW CHAT ROUTES
+    // ✅ 🆕 Get single food by ID (ADDED THIS ROUTE)
+    app.get('/api/foods/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        
+        // Check if the ID is a valid ObjectId
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ error: 'Invalid food ID' });
+        }
 
-    // GET messages for a specific chat room
+        const query = { _id: new ObjectId(id) };
+        const result = await foodsCollection.findOne(query);
+        
+        if (!result) {
+          return res.status(404).send({ error: 'Food not found' });
+        }
+        
+        res.send(result);
+      } catch (error) {
+        console.error('Error fetching food:', error);
+        res.status(500).send({ error: 'Failed to fetch food details' });
+      }
+    });
+
+    // ✅ Get messages for a chat room
     app.get('/api/messages/:roomId', async (req, res) => {
       try {
         const roomId = req.params.roomId;
-        const messages = await messagesCollection.find({ roomId })
+        const messages = await messagesCollection
+          .find({ roomId })
           .sort({ timestamp: 1 })
           .toArray();
         res.send(messages);
@@ -132,7 +170,7 @@ async function run() {
       }
     });
 
-    // GET all chat rooms for a user
+    // ✅ Get all chat rooms for a user
     app.get('/api/chat-rooms/:userId', async (req, res) => {
       try {
         const userId = req.params.userId;
@@ -148,18 +186,20 @@ async function run() {
       }
     });
 
-  } finally {
-    // Keep connection alive
+    console.log("✅ MongoDB connected successfully");
+  } catch (error) {
+    console.error("❌ MongoDB connection failed:", error);
   }
 }
+
 run().catch(console.dir);
 
-// Root route
+// -------------------- Root route --------------------
 app.get('/', (req, res) => {
   res.send('Food-Circle with Live Chat is Cooking!');
 });
 
-// Change from app.listen to server.listen
+// -------------------- Server Listen --------------------
 server.listen(port, () => {
-  console.log(`Food-Circle with Live Chat is Running on Port: ${port}`);
+  console.log(`🍔 Food-Circle Backend Running on Port: ${port}`);
 });
