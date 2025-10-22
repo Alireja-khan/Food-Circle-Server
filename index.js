@@ -177,6 +177,31 @@ io.on('connection', (socket) => {
     }
   });
 
+  // ✅ Handle new food notifications (MOVED INSIDE THE CONNECTION BLOCK)
+  socket.on('new_food_added', async (foodData) => {
+    try {
+      console.log(`New food added: ${foodData.foodName} by ${foodData.donorName}`);
+
+      // Broadcast to all connected users except the one who added the food
+      socket.broadcast.emit('food_notification', {
+        type: 'NEW_FOOD',
+        foodId: foodData._id,
+        foodName: foodData.foodName,
+        foodImage: foodData.foodImage,
+        donorName: foodData.donorName,
+        donorImage: foodData.donorImage,
+        quantity: foodData.quantity,
+        category: foodData.category,
+        pickupLocation: foodData.pickupLocation,
+        timestamp: new Date(),
+        message: `${foodData.donorName} added new ${foodData.foodName}`
+      });
+
+    } catch (error) {
+      console.error('Error handling food notification:', error);
+    }
+  });
+
   // ✅ Handle user disconnect
   socket.on('disconnect', () => {
     const user = activeUsers.get(socket.id);
@@ -204,7 +229,7 @@ async function run() {
   try {
     await client.connect();
     const db = client.db('foodCircle');
-    
+
     // Initialize collections
     foodsCollection = db.collection('foods');
     requestCollection = db.collection('requests');
@@ -283,6 +308,30 @@ async function run() {
         foodData.status = 'available';
 
         const result = await foodsCollection.insertOne(foodData);
+
+        // Emit notification after successful food addition
+        if (result.insertedId) {
+          const newFood = {
+            _id: result.insertedId,
+            ...foodData
+          };
+
+          // Broadcast to all connected sockets
+          io.emit('food_notification', {
+            type: 'NEW_FOOD',
+            foodId: newFood._id,
+            foodName: newFood.foodName,
+            foodImage: newFood.foodImage,
+            donorName: newFood.donorName,
+            donorImage: newFood.donorImage,
+            quantity: newFood.quantity,
+            category: newFood.category,
+            pickupLocation: newFood.pickupLocation,
+            timestamp: new Date(),
+            message: `${newFood.donorName} added new ${newFood.foodName}`
+          });
+        }
+
         res.send(result);
       } catch (error) {
         console.error('Error adding food:', error);
@@ -450,12 +499,12 @@ async function run() {
 
         userMessages.forEach(message => {
           const roomId = message.roomId;
-          
+
           if (!roomsMap.has(roomId)) {
             // Extract other user ID from roomId
             const usersInRoom = roomId.split('_');
             const otherUserId = usersInRoom.find(id => id !== userId);
-            
+
             roomsMap.set(roomId, {
               roomId,
               otherUserId,
@@ -464,7 +513,7 @@ async function run() {
               messages: []
             });
           }
-          
+
           roomsMap.get(roomId).messages.push(message);
         });
 
@@ -473,9 +522,9 @@ async function run() {
           // Sort messages by timestamp to get the last one
           room.messages.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
           const lastMessage = room.messages[0];
-          
+
           // Count unread messages
-          const unreadCount = room.messages.filter(msg => 
+          const unreadCount = room.messages.filter(msg =>
             msg.senderId !== userId && !msg.read
           ).length;
 
@@ -559,7 +608,7 @@ async function run() {
       try {
         const collections = await client.db('foodCircle').listCollections().toArray();
         const collectionNames = collections.map(col => col.name);
-        
+
         const messagesCount = await messagesCollection.countDocuments();
         const usersCount = await usersCollection.countDocuments();
 
