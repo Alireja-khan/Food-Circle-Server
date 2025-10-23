@@ -5,6 +5,9 @@ const http = require('http');
 const { Server } = require('socket.io');
 const port = process.env.PORT || 5000;
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
 require('dotenv').config();
 
 // -------------------- Middleware --------------------
@@ -14,6 +17,43 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json());
+app.use('/uploads', express.static('uploads')); // Serve uploaded files
+
+// -------------------- Multer Configuration for File Uploads --------------------
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/');
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename with timestamp
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'food-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+// File filter for images only
+const fileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed!'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: fileFilter
+});
 
 // -------------------- Create HTTP server and Socket.IO --------------------
 const server = http.createServer(app);
@@ -177,7 +217,7 @@ io.on('connection', (socket) => {
     }
   });
 
-  // ✅ Handle new food notifications (MOVED INSIDE THE CONNECTION BLOCK)
+  // ✅ Handle new food notifications
   socket.on('new_food_added', async (foodData) => {
     try {
       console.log(`New food added: ${foodData.foodName} by ${foodData.donorName}`);
@@ -238,6 +278,48 @@ async function run() {
 
     console.log("✅ MongoDB connected successfully");
 
+    // ==================== IMAGE UPLOAD ROUTES ====================
+
+    // Image upload endpoint
+    app.post('/api/upload', upload.single('image'), async (req, res) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ error: 'No image file uploaded' });
+        }
+
+        // Construct the image URL
+        const imageUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+
+        res.json({
+          success: true,
+          imageUrl: imageUrl,
+          filename: req.file.filename,
+          message: 'Image uploaded successfully'
+        });
+      } catch (error) {
+        console.error('Error uploading image:', error);
+        res.status(500).json({ error: 'Failed to upload image' });
+      }
+    });
+
+    // Delete uploaded image (optional cleanup)
+    app.delete('/api/upload/:filename', async (req, res) => {
+      try {
+        const filename = req.params.filename;
+        const filePath = path.join(__dirname, 'uploads', filename);
+
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          res.json({ success: true, message: 'Image deleted successfully' });
+        } else {
+          res.status(404).json({ error: 'File not found' });
+        }
+      } catch (error) {
+        console.error('Error deleting image:', error);
+        res.status(500).json({ error: 'Failed to delete image' });
+      }
+    });
+
     // ==================== FOOD ROUTES ====================
 
     // Get all foods
@@ -269,7 +351,11 @@ async function run() {
     // Get all available foods
     app.get('/api/foods/available', async (req, res) => {
       try {
-        const result = await foodsCollection.find({ status: 'available' }).toArray();
+        const today = new Date().toISOString().split('T')[0];
+        const result = await foodsCollection.find({
+          status: 'available',
+          expireDate: { $gte: today }
+        }).toArray();
         res.send(result);
       } catch (error) {
         console.error('Error fetching available foods:', error);
@@ -300,12 +386,20 @@ async function run() {
       }
     });
 
-    // Add food
-    app.post('/api/foods', async (req, res) => {
+    // Add food with image upload support
+    app.post('/api/foods', upload.single('foodImage'), async (req, res) => {
       try {
         const foodData = req.body;
         foodData.postedDate = new Date();
         foodData.status = 'available';
+
+        // Handle image upload
+        if (req.file) {
+          // If image was uploaded via multer
+          foodData.foodImage = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+          foodData.imageFilename = req.file.filename; // Store filename for potential deletion
+        }
+        // If foodImage is provided in body (URL), it will be used as is
 
         const result = await foodsCollection.insertOne(foodData);
 
@@ -339,42 +433,306 @@ async function run() {
       }
     });
 
-    // Update food
+    // Update food (with optional image update)
     app.patch('/api/foods/:id', async (req, res) => {
       try {
         const id = req.params.id;
         const updates = req.body;
 
+        console.log(`✏️ Update request for food ID: ${id}`, updates);
+
         if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: 'Invalid food ID' });
+          return res.status(400).json({ error: 'Invalid food ID' });
+        }
+
+        // Validate required fields
+        const requiredFields = ['foodName', 'quantity', 'pickupLocation', 'expireDate'];
+        const missingFields = requiredFields.filter(field => !updates[field]);
+
+        if (missingFields.length > 0) {
+          return res.status(400).json({
+            error: 'Missing required fields',
+            missingFields
+          });
         }
 
         const result = await foodsCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: updates }
+          { $set: { ...updates, lastUpdated: new Date() } }
         );
 
-        res.send(result);
+        console.log(`✅ Food updated. Modified count: ${result.modifiedCount}`);
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({ error: 'Food not found or no changes made' });
+        }
+
+        res.json({
+          success: true,
+          modifiedCount: result.modifiedCount,
+          message: 'Food updated successfully'
+        });
+
       } catch (error) {
-        console.error('Error updating food:', error);
-        res.status(500).send({ error: 'Failed to update food' });
+        console.error('❌ Error updating food:', error);
+        res.status(500).json({ error: 'Failed to update food', details: error.message });
       }
     });
 
-    // Delete food
+    // Delete food (with image cleanup)
     app.delete('/api/foods/:id', async (req, res) => {
       try {
         const id = req.params.id;
+        console.log(`🗑️ Delete request for food ID: ${id}`);
 
         if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: 'Invalid food ID' });
+          console.log('❌ Invalid food ID format');
+          return res.status(400).json({ error: 'Invalid food ID format' });
+        }
+
+        // Get food data first to check for associated image file
+        const food = await foodsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!food) {
+          console.log('❌ Food not found for deletion');
+          return res.status(404).json({ error: 'Food not found' });
         }
 
         const result = await foodsCollection.deleteOne({ _id: new ObjectId(id) });
-        res.send(result);
+
+        // Delete associated image file if it exists in uploads folder
+        if (result.deletedCount > 0 && food && food.imageFilename) {
+          const filePath = path.join(__dirname, 'uploads', food.imageFilename);
+          if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+            console.log(`✅ Deleted associated image file: ${food.imageFilename}`);
+          }
+        }
+
+        console.log(`✅ Food deleted successfully. Deleted count: ${result.deletedCount}`);
+        res.json({
+          success: true,
+          deletedCount: result.deletedCount,
+          message: 'Food deleted successfully'
+        });
+
       } catch (error) {
-        console.error('Error deleting food:', error);
-        res.status(500).send({ error: 'Failed to delete food' });
+        console.error('❌ Error deleting food:', error);
+        res.status(500).json({ error: 'Failed to delete food', details: error.message });
+      }
+    });
+
+
+
+    // ==================== REQUEST ROUTES ====================
+
+    // Create a new food request
+    app.post('/api/requests', async (req, res) => {
+      try {
+        const requestData = req.body;
+        requestData.requestDate = new Date();
+        requestData.status = 'Pending'; // Pending, Approved, Rejected, Completed
+
+        console.log('📝 Creating new food request:', requestData);
+
+        const result = await requestCollection.insertOne(requestData);
+
+        // Emit notification to donor
+        io.emit('new_request_notification', {
+          type: 'NEW_REQUEST',
+          requestId: result.insertedId,
+          foodName: requestData.foodName,
+          requesterName: requestData.requesterName,
+          requesterEmail: requestData.requesterEmail,
+          donorEmail: requestData.donorEmail,
+          timestamp: new Date(),
+          message: `${requestData.requesterName} requested ${requestData.foodName}`
+        });
+
+        res.json({
+          success: true,
+          insertedId: result.insertedId,
+          message: 'Food request submitted successfully'
+        });
+
+      } catch (error) {
+        console.error('❌ Error creating request:', error);
+        res.status(500).json({ error: 'Failed to submit request', details: error.message });
+      }
+    });
+
+    // Get all requests for a specific donor
+    app.get('/api/requests/donor/:donorEmail', async (req, res) => {
+      try {
+        const donorEmail = req.params.donorEmail;
+        console.log(`📨 Fetching requests for donor: ${donorEmail}`);
+
+        const requests = await requestCollection.find({ donorEmail }).sort({ requestDate: -1 }).toArray();
+
+        res.json({
+          success: true,
+          requests: requests,
+          count: requests.length
+        });
+
+      } catch (error) {
+        console.error('❌ Error fetching donor requests:', error);
+        res.status(500).json({ error: 'Failed to fetch requests', details: error.message });
+      }
+    });
+
+    // Get all requests made by a specific user
+    app.get('/api/requests/user/:userEmail', async (req, res) => {
+      try {
+        const userEmail = req.params.userEmail;
+        console.log(`📨 Fetching requests for user: ${userEmail}`);
+
+        const requests = await requestCollection.find({ userEmail }).sort({ requestDate: -1 }).toArray();
+
+        res.json({
+          success: true,
+          requests: requests,
+          count: requests.length
+        });
+
+      } catch (error) {
+        console.error('❌ Error fetching user requests:', error);
+        res.status(500).json({ error: 'Failed to fetch requests', details: error.message });
+      }
+    });
+
+    // Get all requests (admin)
+    app.get('/api/requests', async (req, res) => {
+      try {
+        const requests = await requestCollection.find({}).sort({ requestDate: -1 }).toArray();
+        res.json({
+          success: true,
+          requests: requests,
+          count: requests.length
+        });
+      } catch (error) {
+        console.error('❌ Error fetching all requests:', error);
+        res.status(500).json({ error: 'Failed to fetch requests', details: error.message });
+      }
+    });
+
+    // Update request status
+    app.patch('/api/requests/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { status, adminNotes } = req.body;
+
+        console.log(`✏️ Updating request ${id} to status: ${status}`);
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ error: 'Invalid request ID' });
+        }
+
+        const updateData = {
+          status,
+          updatedAt: new Date()
+        };
+
+        if (adminNotes) {
+          updateData.adminNotes = adminNotes;
+        }
+
+        const result = await requestCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).json({ error: 'Request not found or no changes made' });
+        }
+
+        // Get the updated request to send notification
+        const updatedRequest = await requestCollection.findOne({ _id: new ObjectId(id) });
+
+        // Emit status update notification
+        io.emit('request_status_updated', {
+          type: 'STATUS_UPDATE',
+          requestId: id,
+          foodName: updatedRequest.foodName,
+          status: status,
+          requesterEmail: updatedRequest.userEmail,
+          donorEmail: updatedRequest.donorEmail,
+          timestamp: new Date(),
+          message: `Your request for ${updatedRequest.foodName} has been ${status.toLowerCase()}`
+        });
+
+        res.json({
+          success: true,
+          modifiedCount: result.modifiedCount,
+          message: `Request ${status.toLowerCase()} successfully`
+        });
+
+      } catch (error) {
+        console.error('❌ Error updating request:', error);
+        res.status(500).json({ error: 'Failed to update request', details: error.message });
+      }
+    });
+
+    // Delete a request
+    app.delete('/api/requests/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+        console.log(`🗑️ Deleting request: ${id}`);
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ error: 'Invalid request ID' });
+        }
+
+        const result = await requestCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ error: 'Request not found' });
+        }
+
+        res.json({
+          success: true,
+          deletedCount: result.deletedCount,
+          message: 'Request deleted successfully'
+        });
+
+      } catch (error) {
+        console.error('❌ Error deleting request:', error);
+        res.status(500).json({ error: 'Failed to delete request', details: error.message });
+      }
+    });
+
+    // Get request statistics for a user
+    app.get('/api/requests/stats/:userEmail', async (req, res) => {
+      try {
+        const userEmail = req.params.userEmail;
+
+        const totalRequests = await requestCollection.countDocuments({ userEmail });
+        const pendingRequests = await requestCollection.countDocuments({
+          userEmail,
+          status: 'Pending'
+        });
+        const approvedRequests = await requestCollection.countDocuments({
+          userEmail,
+          status: 'Approved'
+        });
+        const completedRequests = await requestCollection.countDocuments({
+          userEmail,
+          status: 'Completed'
+        });
+
+        res.json({
+          success: true,
+          stats: {
+            total: totalRequests,
+            pending: pendingRequests,
+            approved: approvedRequests,
+            completed: completedRequests
+          }
+        });
+
+      } catch (error) {
+        console.error('❌ Error fetching request stats:', error);
+        res.status(500).json({ error: 'Failed to fetch request statistics', details: error.message });
       }
     });
 
@@ -384,6 +742,20 @@ async function run() {
     async function deleteExpiredFoods() {
       try {
         const today = new Date();
+        const expiredFoods = await foodsCollection.find({
+          expireDate: { $lt: today.toISOString().split('T')[0] }
+        }).toArray();
+
+        // Delete associated image files
+        for (const food of expiredFoods) {
+          if (food.imageFilename) {
+            const filePath = path.join(__dirname, 'uploads', food.imageFilename);
+            if (fs.existsSync(filePath)) {
+              fs.unlinkSync(filePath);
+            }
+          }
+        }
+
         const result = await foodsCollection.deleteMany({
           expireDate: { $lt: today.toISOString().split('T')[0] }
         });
@@ -399,21 +771,6 @@ async function run() {
     // Run immediately on startup and then daily at midnight
     deleteExpiredFoods();
     setInterval(deleteExpiredFoods, 24 * 60 * 60 * 1000); // Run every 24 hours
-
-    // Update available foods route to exclude foods expiring today
-    app.get('/api/foods/available', async (req, res) => {
-      try {
-        const today = new Date().toISOString().split('T')[0];
-        const result = await foodsCollection.find({
-          status: 'available',
-          expireDate: { $gte: today } // Only foods expiring today or later
-        }).toArray();
-        res.send(result);
-      } catch (error) {
-        console.error('Error fetching available foods:', error);
-        res.status(500).send({ error: 'Failed to fetch available foods' });
-      }
-    });
 
     // ==================== USER ROUTES ====================
 
@@ -515,7 +872,7 @@ async function run() {
       }
     });
 
-    // ✅ FIXED: Get all chat rooms for a user - ULTRA SIMPLE VERSION
+    // Get all chat rooms for a user
     app.get('/api/chat-rooms/:userId', async (req, res) => {
       try {
         const userId = req.params.userId;
@@ -589,7 +946,6 @@ async function run() {
 
       } catch (error) {
         console.error('💥 ERROR in /api/chat-rooms:', error);
-        // Return empty array instead of error for better UX
         res.send([]);
       }
     });
@@ -684,7 +1040,7 @@ run().catch(console.dir);
 
 // -------------------- Root route --------------------
 app.get('/', (req, res) => {
-  res.send('Food-Circle with Live Chat is Cooking! 🍔💬');
+  res.send('Food-Circle with Image Upload & Live Chat is Cooking! 🍔💬📸');
 });
 
 // -------------------- Health check route --------------------
@@ -696,10 +1052,21 @@ app.get('/health', (req, res) => {
   });
 });
 
+// -------------------- Error handling middleware --------------------
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large. Maximum size is 5MB.' });
+    }
+  }
+  res.status(500).json({ error: error.message });
+});
+
 // -------------------- Server Listen --------------------
 server.listen(port, () => {
   console.log(`🍔 Food-Circle Backend Running on Port: ${port}`);
   console.log(`💬 Socket.IO server is active`);
+  console.log(`📸 Image upload system is ready`);
   console.log(`🌐 CORS enabled for frontend connections`);
 });
 
