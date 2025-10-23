@@ -17,7 +17,7 @@ app.use(cors({
     "http://localhost:3000", 
     "https://utter-waste.surge.sh",
     "https://flourishing-pony-67c650.netlify.app",
-    "https://food-cirrcle.netlify.app/",
+    "https://food-cirrcle.netlify.app",
   ],
   methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
   credentials: true
@@ -71,7 +71,7 @@ const io = new Server(server, {
       "https://utter-waste.surge.sh",
       "https://food-circle-server-9zagiegfa-alireja-khans-projects.vercel.app",
       "https://flourishing-pony-67c650.netlify.app",
-      "https://food-cirrcle.netlify.app/",
+      "https://food-cirrcle.netlify.app",
     ],
     methods: ["GET", "POST"],
     credentials: true
