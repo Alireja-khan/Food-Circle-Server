@@ -378,6 +378,43 @@ async function run() {
       }
     });
 
+    // ==================== FOOD EXPIRY SYSTEM ====================
+
+    // Function to check and delete expired foods
+    async function deleteExpiredFoods() {
+      try {
+        const today = new Date();
+        const result = await foodsCollection.deleteMany({
+          expireDate: { $lt: today.toISOString().split('T')[0] }
+        });
+
+        if (result.deletedCount > 0) {
+          console.log(`🗑️ Auto-removed ${result.deletedCount} expired food(s)`);
+        }
+      } catch (error) {
+        console.error('Error deleting expired foods:', error);
+      }
+    }
+
+    // Run immediately on startup and then daily at midnight
+    deleteExpiredFoods();
+    setInterval(deleteExpiredFoods, 24 * 60 * 60 * 1000); // Run every 24 hours
+
+    // Update available foods route to exclude foods expiring today
+    app.get('/api/foods/available', async (req, res) => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
+        const result = await foodsCollection.find({
+          status: 'available',
+          expireDate: { $gte: today } // Only foods expiring today or later
+        }).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error('Error fetching available foods:', error);
+        res.status(500).send({ error: 'Failed to fetch available foods' });
+      }
+    });
+
     // ==================== USER ROUTES ====================
 
     // Register user for chat system
